@@ -2,90 +2,75 @@ name: Deploy Backend to Host
 on:
   push:
     branches:
-      - main  # 仅在 main 分支推送时触发
+      - main
 jobs:
   docker-deploy:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取代码仓库
+      # 1. 拉取代码
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. 配置 Java 环境（适配 Maven 构建）
+      # 2. 配置 Java 环境
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          java-version: '17'       # Java 版本
-          distribution: 'adopt'    # 发行版（Adoptium）
+          java-version: '17'
+          distribution: 'adopt'
 
-      # 3. 运行 Maven 构建（打包项目并解压依赖）
+      # 3. Maven 构建
       - name: Run Maven Build
         run: |
-          mvn clean install -DskipTests -B  # 清理、安装，跳过测试
-          mkdir -p target/dependency && (cd target/dependency; unzip ../*.jar)  # 解压依赖
+          mvn clean install -DskipTests -B
+          mkdir -p target/dependency && (cd target/dependency; unzip ../*.jar)
 
-      # 4. 配置 QEMU（跨架构构建支持）
+      # 4. 配置 Docker 构建环境
       - name: Set Up QEMU
         uses: docker/setup-qemu-action@v3
-
-      # 5. 配置 Docker Buildx（多架构构建能力）
       - name: Set Up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 6. 登录 Docker Hub（使用 Secrets 安全存储的凭证）
+      # 5. 登录 Docker Hub
       - name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3  # 升级到最新版
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}  # Docker Hub 用户名（Secrets 中配置）
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}      # Docker Hub 访问令牌（Secrets 中配置）
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-      # 7. 准备 Docker Compose 运行环境
-      - name: Prepare Docker Compose
-        run: ls -l  # 查看当前目录文件（可选，用于调试）
-
-      # 8. 构建并推送 Docker 镜像到 Docker Hub
+      # 6. 构建并推送镜像
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v6
         with:
-          context: .  # 构建上下文为当前目录
-          push: true  # 推送到镜像仓库
-          # 替换为你的 Docker Hub 用户名
-          tags: 20232076/234-deploylab-backend:latest
+          context: .
+          push: true
+          tags: 20232076/234-deploylab-backend:latest  # 替换为你的 Docker Hub 用户名
 
-      # 9. 通过 SCP 拷贝 docker-compose.yml 到服务器
-      - name: Copy docker-compose via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.HOST_SERVER }}        # 服务器 IP/域名（Secrets 中配置）
-          username: ${{ secrets.HOST_USER_NAME }} # 服务器用户名（Secrets 中配置）
-          key: ${{ secrets.HOST_SSH_PRIVATE_KEY }}# 服务器 SSH 私钥（Secrets 中配置）
-          port: 22                                # SSH 端口，默认 22
-          source: "docker-compose.yml"            # 本地要拷贝的文件
-          target: "/home/ubuntu/backend"          # 服务器目标路径
-
-      # 10. 远程执行 Docker Compose 命令启动服务
-      - name: Run Docker Compose on Server
-        uses: appleboy/ssh-action@v1.2.1
+      # 7. 修复 SSH 认证：使用最新版 Action + 显式配置私钥
+      - name: Copy docker-compose via SCP (Fixed SSH)
+        uses: appleboy/scp-action@v1.0.0  # 升级到较新版本
         with:
           host: ${{ secrets.HOST_SERVER }}
           username: ${{ secrets.HOST_USER_NAME }}
           key: ${{ secrets.HOST_SSH_PRIVATE_KEY }}
           port: 22
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/backend"
+          # 新增：显式指定私钥格式（可选，解决旧版本兼容问题）
+          key_format: "pem"
+
+      # 8. 远程运行 Docker Compose（同步升级 Action 版本）
+      - name: Run Docker Compose on Server (Fixed SSH)
+        uses: appleboy/ssh-action@v1.0.0  # 升级到较新版本
+        with:
+          host: ${{ secrets.HOST_SERVER }}
+          username: ${{ secrets.HOST_USER_NAME }}
+          key: ${{ secrets.HOST_SSH_PRIVATE_KEY }}
+          port: 22
+          key_format: "pem"  # 显式指定私钥格式
           script: |
-            # 进入目标目录
             cd /home/ubuntu/backend
-            
-            # 登录 Docker Hub（避免拉取镜像权限问题）
             echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login --username ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-            
-            # 停止并删除旧容器
             docker compose down
-            
-            # 拉取最新镜像
             docker compose pull
-            
-            # 启动新容器（detached 模式，后台运行）
             docker compose up -d
-            
-            # 清理临时文件（可选，根据需求调整）
             rm -rf /home/ubuntu/backend
