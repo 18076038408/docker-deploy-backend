@@ -1,0 +1,10 @@
+version = 1
+
+[[analyzers]]
+name = "java"  # 如果是 Python 后端用这个；如果是 Java 就改成 "java"
+enabled = true
+
+# 下面的 patterns 按需调整，和你代码里的测试文件、排除文件匹配
+#[analyzers.meta]
+#test_file_patterns = ["test/**", "integration_tests/tests/**/*.py", "**/*_test.go"]
+#excluded_file_patterns = ["migrations/**", "/dist/main.js"]
